@@ -3,8 +3,12 @@
 The interceptor is the runtime control point between AI agents and tools.
 """
 
+from typing import Any
+
+from rygnal.approval import ApprovalWorkflow
 from rygnal.audit_logger import AuditLogger
 from rygnal.models import (
+    ApprovalDecision,
     Decision,
     ExecutionStatus,
     InterceptorResult,
@@ -25,51 +29,104 @@ class RygnalInterceptor:
         audit_logger: AuditLogger,
         tool_executor: ToolExecutor,
         risk_engine: RiskEngine | None = None,
+        approval_workflow: ApprovalWorkflow | None = None,
     ) -> None:
         self.policy_engine = policy_engine
         self.audit_logger = audit_logger
         self.tool_executor = tool_executor
         self.risk_engine = risk_engine or RiskEngine()
+        self.approval_workflow = approval_workflow
 
     def intercept(self, request: ToolRequest) -> InterceptorResult:
-        """Assess risk, apply policy, audit, and optionally execute a tool request."""
+        """Assess risk, evaluate policy, audit, and optionally execute a tool request."""
         risk_assessment = self.risk_engine.assess(request)
-        policy_decision = self.policy_engine.evaluate(request)
+        risk_metadata = self._risk_metadata(risk_assessment)
 
-        audit_metadata = {
-            "risk_score": risk_assessment.risk_score,
-            "risk_level": risk_assessment.risk_level.value,
-            "risk_reasons": risk_assessment.reasons,
-            "risk_signals": [signal.model_dump(mode="json") for signal in risk_assessment.signals],
-        }
+        policy_decision = self.policy_engine.evaluate(request)
+        approval_decision: ApprovalDecision | None = None
+
+        # Flatten risk metadata to top level for backward compatibility
+        audit_metadata: dict[str, Any] = risk_metadata.copy()
+
+        if policy_decision.decision == Decision.REQUIRE_APPROVAL:
+            approval_workflow = self.approval_workflow or ApprovalWorkflow()
+            approval_request, approval_decision = approval_workflow.request_approval(
+                request=request,
+                policy_decision=policy_decision,
+                risk_assessment=risk_metadata,
+            )
+            audit_metadata["approval"] = {
+                "approval_id": approval_request.approval_id,
+                "status": approval_decision.status,
+                "approved": approval_decision.approved,
+                "decided_by": approval_decision.decided_by,
+                "decided_at": approval_decision.decided_at,
+                "reason": approval_decision.reason,
+            }
 
         audit_event = self.audit_logger.log_decision(
-            request, policy_decision, metadata=audit_metadata
+            request=request,
+            policy_decision=policy_decision,
+            metadata=audit_metadata,
         )
 
-        if policy_decision.decision == Decision.ALLOW:
-            execution = self.tool_executor.execute(request)
-        elif policy_decision.decision == Decision.SIMULATE:
-            execution = ToolExecutionResult(
-                status=ExecutionStatus.SIMULATED,
-                executed=False,
-                output="Simulated decision. Tool was not executed.",
-            )
-        else:
-            execution = ToolExecutionResult(
-                status=ExecutionStatus.SKIPPED,
-                executed=False,
-                error=f"Tool execution skipped because decision is: {policy_decision.decision}",
-            )
+        execution = self._execute_with_decision(
+            request=request,
+            policy_decision=policy_decision,
+            approval_decision=approval_decision,
+        )
 
         return InterceptorResult(
             request=request,
+            risk_assessment=risk_metadata,
             policy_decision=policy_decision,
             audit_event=audit_event,
             execution=execution,
-            risk_assessment=risk_assessment.model_dump(mode="json"),
+            approval_decision=approval_decision,
         )
 
     def handle(self, request: ToolRequest) -> InterceptorResult:
         """Alias for intercept."""
         return self.intercept(request)
+
+    def _execute_with_decision(
+        self,
+        request: ToolRequest,
+        policy_decision: Any,
+        approval_decision: ApprovalDecision | None,
+    ) -> ToolExecutionResult:
+        if policy_decision.decision == Decision.ALLOW:
+            return self.tool_executor.execute(request)
+
+        if policy_decision.decision == Decision.SIMULATE:
+            return ToolExecutionResult(
+                status=ExecutionStatus.SIMULATED,
+                executed=False,
+                output="Simulated decision. Tool was not executed.",
+            )
+
+        if policy_decision.decision == Decision.REQUIRE_APPROVAL:
+            if approval_decision and approval_decision.approved:
+                return self.tool_executor.execute(request)
+
+            return ToolExecutionResult(
+                status=ExecutionStatus.SKIPPED,
+                executed=False,
+                error="Tool execution skipped because approval was not granted.",
+            )
+
+        return ToolExecutionResult(
+            status=ExecutionStatus.SKIPPED,
+            executed=False,
+            error=f"Tool execution skipped because decision is: {policy_decision.decision}",
+        )
+
+    @staticmethod
+    def _risk_metadata(risk_assessment: Any) -> dict[str, Any]:
+        if hasattr(risk_assessment, "model_dump"):
+            return risk_assessment.model_dump(mode="json")
+
+        if isinstance(risk_assessment, dict):
+            return risk_assessment
+
+        return {}
