@@ -23,6 +23,11 @@ def new_trace_id() -> str:
     return f"trace_{uuid4().hex}"
 
 
+def new_approval_id() -> str:
+    """Return a unique approval request ID."""
+    return f"apr_{uuid4().hex}"
+
+
 class Decision(StrEnum):
     """Possible policy decisions."""
 
@@ -48,6 +53,14 @@ class ExecutionStatus(StrEnum):
     SKIPPED = "skipped"
     FAILED = "failed"
     SIMULATED = "simulated"
+
+
+class ApprovalStatus(StrEnum):
+    """Approval lifecycle status."""
+
+    PENDING = "pending"
+    APPROVED = "approved"
+    REJECTED = "rejected"
 
 
 class ToolRequest(BaseModel):
@@ -86,6 +99,38 @@ class PolicyDecision(BaseModel):
     severity: Severity
     reason: str
     policy_id: str | None = None
+
+
+class ApprovalRequest(BaseModel):
+    """Approval request created for human-reviewed actions."""
+
+    approval_id: str = Field(default_factory=new_approval_id)
+    created_at: str = Field(default_factory=utc_now_iso)
+    trace_id: str = Field(default_factory=new_trace_id)
+
+    requested_by: str
+    agent_id: str
+    environment: str
+
+    tool_name: str
+    action: str | None = None
+    target: Any | None = None
+    policy_id: str | None = None
+    reason: str
+    risk_assessment: dict[str, Any] = Field(default_factory=dict)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class ApprovalDecision(BaseModel):
+    """Human approval result."""
+
+    approval_id: str
+    status: ApprovalStatus
+    approved: bool
+    decided_by: str | None = None
+    decided_at: str | None = None
+    reason: str
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
 
 class AuditEvent(BaseModel):
@@ -129,7 +174,8 @@ class InterceptorResult(BaseModel):
     """Final result returned by the Rygnal interceptor."""
 
     request: ToolRequest
+    risk_assessment: dict[str, Any]
     policy_decision: PolicyDecision
     audit_event: AuditEvent
     execution: ToolExecutionResult
-    risk_assessment: dict[str, Any]
+    approval_decision: ApprovalDecision | None = None
