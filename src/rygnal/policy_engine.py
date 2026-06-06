@@ -58,14 +58,19 @@ class PolicyEngine:
             policy_version=policy_schema.policy_version,
         )
 
-    def evaluate(self, request: ToolRequest) -> PolicyDecision:
+    def evaluate(
+        self,
+        request: ToolRequest,
+        risk_assessment: Any | None = None,
+    ) -> PolicyDecision:
         """Return the first matching policy decision with explain output."""
         evaluated_rule_ids: list[str] = []
+        risk_context = self._risk_context(risk_assessment)
 
         for rule in self.rules:
             evaluated_rule_ids.append(rule.id)
 
-            if self._matches(rule, request):
+            if self._matches(rule, request, risk_context):
                 return PolicyDecision(
                     decision=rule.decision,
                     allowed=self._is_allowed(rule.decision),
@@ -100,7 +105,12 @@ class PolicyEngine:
             ),
         )
 
-    def _matches(self, rule: PolicyRule, request: ToolRequest) -> bool:
+    def _matches(
+        self,
+        rule: PolicyRule,
+        request: ToolRequest,
+        risk_context: dict[str, Any],
+    ) -> bool:
         if rule.tool_name and rule.tool_name != request.tool_name:
             return False
 
@@ -116,7 +126,29 @@ class PolicyEngine:
         if rule.input_contains and rule.input_contains not in self._stringify(request.input):
             return False
 
+        if rule.risk_level and rule.risk_level != risk_context.get("risk_level"):
+            return False
+
+        if rule.risk_score_min is not None:
+            risk_score = risk_context.get("risk_score")
+            if risk_score is None or risk_score < rule.risk_score_min:
+                return False
+
         return True
+
+    @staticmethod
+    def _risk_context(risk_assessment: Any | None) -> dict[str, Any]:
+        """Normalize optional risk assessment for policy evaluation."""
+        if risk_assessment is None:
+            return {}
+
+        if hasattr(risk_assessment, "model_dump"):
+            return risk_assessment.model_dump(mode="json")
+
+        if isinstance(risk_assessment, dict):
+            return risk_assessment
+
+        return {}
 
     @staticmethod
     def _matched_conditions(rule: PolicyRule) -> list[str]:
@@ -137,6 +169,12 @@ class PolicyEngine:
 
         if rule.input_contains:
             conditions.append("input_contains")
+
+        if rule.risk_level:
+            conditions.append("risk_level")
+
+        if rule.risk_score_min is not None:
+            conditions.append("risk_score_min")
 
         return conditions
 

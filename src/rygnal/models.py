@@ -98,6 +98,8 @@ class PolicyRule(BaseModel):
     environment: str | None = None
     target_contains: str | None = None
     input_contains: str | None = None
+    risk_level: str | None = None
+    risk_score_min: int | None = Field(default=None, ge=0, le=100)
 
 
 class PolicySchema(BaseModel):
