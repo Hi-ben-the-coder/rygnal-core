@@ -1,5 +1,5 @@
 pytest>=9.0.3
-ruff>=0.5.0
+ruff>=0.15.16
 bandit>=1.7.9
 pip-audit>=2.10.0
 pydantic>=2.7.0
