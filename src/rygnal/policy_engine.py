@@ -61,11 +61,12 @@ class PolicyEngine:
     def evaluate(self, request: ToolRequest) -> PolicyDecision:
         """Return the first matching policy decision with explain output."""
         evaluated_rule_ids: list[str] = []
+        risk_context = self._risk_context(getattr(request, "risk_assessment", None))
 
         for rule in self.rules:
             evaluated_rule_ids.append(rule.id)
 
-            if self._matches(rule, request):
+            if self._matches(rule, request, risk_context):
                 return PolicyDecision(
                     decision=rule.decision,
                     allowed=self._is_allowed(rule.decision),
@@ -100,7 +101,12 @@ class PolicyEngine:
             ),
         )
 
-    def _matches(self, rule: PolicyRule, request: ToolRequest) -> bool:
+    def _matches(
+        self,
+        rule: PolicyRule,
+        request: ToolRequest,
+        risk_context: dict[str, Any],
+    ) -> bool:
         if rule.tool_name and rule.tool_name != request.tool_name:
             return False
 
@@ -110,13 +116,79 @@ class PolicyEngine:
         if rule.environment and rule.environment != request.environment:
             return False
 
+        if rule.target_equals and rule.target_equals != request.target:
+            return False
+
         if rule.target_contains and rule.target_contains not in (request.target or ""):
+            return False
+
+        if rule.input_equals is not None and rule.input_equals != request.input:
             return False
 
         if rule.input_contains and rule.input_contains not in self._stringify(request.input):
             return False
 
+        if rule.metadata_equals and not self._metadata_equals(
+            request.metadata,
+            rule.metadata_equals,
+        ):
+            return False
+
+        if rule.metadata_contains and not self._metadata_contains(
+            request.metadata,
+            rule.metadata_contains,
+        ):
+            return False
+
+        if rule.risk_level and rule.risk_level != risk_context.get("risk_level"):
+            return False
+
+        if rule.risk_score_min is not None:
+            risk_score = risk_context.get("risk_score")
+            if risk_score is None or risk_score < rule.risk_score_min:
+                return False
+
         return True
+
+    @staticmethod
+    def _metadata_equals(
+        request_metadata: dict[str, Any],
+        expected_metadata: dict[str, Any],
+    ) -> bool:
+        """Return true when all expected metadata values match exactly."""
+        for key, expected_value in expected_metadata.items():
+            if request_metadata.get(key) != expected_value:
+                return False
+
+        return True
+
+    @staticmethod
+    def _metadata_contains(
+        request_metadata: dict[str, Any],
+        expected_metadata: dict[str, str],
+    ) -> bool:
+        """Return true when metadata string values contain expected text."""
+        for key, expected_value in expected_metadata.items():
+            actual_value = request_metadata.get(key)
+
+            if expected_value not in PolicyEngine._stringify(actual_value):
+                return False
+
+        return True
+
+    @staticmethod
+    def _risk_context(risk_assessment: Any | None) -> dict[str, Any]:
+        """Normalize optional risk assessment for policy evaluation."""
+        if risk_assessment is None:
+            return {}
+
+        if hasattr(risk_assessment, "model_dump"):
+            return risk_assessment.model_dump(mode="json")
+
+        if isinstance(risk_assessment, dict):
+            return risk_assessment
+
+        return {}
 
     @staticmethod
     def _matched_conditions(rule: PolicyRule) -> list[str]:
@@ -132,11 +204,29 @@ class PolicyEngine:
         if rule.environment:
             conditions.append("environment")
 
+        if rule.target_equals:
+            conditions.append("target_equals")
+
         if rule.target_contains:
             conditions.append("target_contains")
 
+        if rule.input_equals is not None:
+            conditions.append("input_equals")
+
         if rule.input_contains:
             conditions.append("input_contains")
+
+        if rule.metadata_equals:
+            conditions.append("metadata_equals")
+
+        if rule.metadata_contains:
+            conditions.append("metadata_contains")
+
+        if rule.risk_level:
+            conditions.append("risk_level")
+
+        if rule.risk_score_min is not None:
+            conditions.append("risk_score_min")
 
         return conditions
 
