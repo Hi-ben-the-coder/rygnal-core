@@ -8,6 +8,7 @@ from operator-managed roles.yaml.
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 
+from rygnal.approval_state import ApprovalStateMachine
 from rygnal.models import (
     ApprovalDecision,
     ApprovalRequest,
@@ -52,17 +53,18 @@ class ApprovalAuthorizationEngine:
         current_status: ApprovalStatus = ApprovalStatus.PENDING,
     ) -> ApprovalAuthorizationResult:
         """Return whether an approval decision is authorized."""
-        if current_status != ApprovalStatus.PENDING:
+        transition_result = ApprovalStateMachine.validate_transition(
+            current_status=current_status,
+            next_status=approval_decision.status,
+        )
+        if not transition_result.allowed:
             return ApprovalAuthorizationResult(
                 allowed=False,
-                reason="Approval request is no longer pending.",
-                metadata={
-                    "guard": "approval-state",
-                    "current_status": current_status.value,
-                },
+                reason=transition_result.reason,
+                metadata=transition_result.metadata,
             )
 
-        if not approval_decision.approved:
+        if approval_decision.status == ApprovalStatus.REJECTED:
             return ApprovalAuthorizationResult(
                 allowed=True,
                 reason="Approval rejection authorized.",

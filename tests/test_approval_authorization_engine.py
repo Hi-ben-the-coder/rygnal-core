@@ -82,8 +82,9 @@ def test_authorization_rejects_non_pending_request_state() -> None:
 
     assert result.allowed is False
     assert result.reason
-    assert result.metadata["guard"] == "approval-state"
+    assert result.metadata["guard"] == "approval-state-transition"
     assert result.metadata["current_status"] == "approved"
+    assert result.metadata["next_status"] == "approved"
 
 
 def test_authorization_rejects_viewer_role_approval() -> None:
