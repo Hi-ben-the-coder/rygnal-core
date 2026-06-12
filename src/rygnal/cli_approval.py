@@ -7,6 +7,7 @@ development and v0.1 demos.
 from __future__ import annotations
 
 import signal
+import sys
 from collections.abc import Callable
 from typing import Any
 
@@ -16,6 +17,10 @@ from rygnal.models import (
     ApprovalRequest,
     ApprovalStatus,
     utc_now_iso,
+)
+
+NON_INTERACTIVE_REJECTION_REASON = (
+    "Approval requested in non-interactive terminal mode. Rejected by default."
 )
 
 
@@ -41,6 +46,13 @@ class CLIApprovalResolver:
     def __call__(self, approval_request: ApprovalRequest) -> ApprovalDecision:
         """Ask a human to approve or reject an approval request."""
         self._print_request_summary(approval_request)
+
+        if self._is_non_interactive_terminal():
+            self.output_func("Non-interactive terminal detected. Rejected by default.")
+            return self._reject(
+                approval_request,
+                reason=NON_INTERACTIVE_REJECTION_REASON,
+            )
 
         try:
             response = self._read_input("Approve this action? [y/N]: ")
@@ -82,6 +94,9 @@ class CLIApprovalResolver:
         self.output_func(f"Risk        : {risk_level} / {risk_score}")
         self.output_func(f"Reason      : {approval_request.reason}")
         self.output_func("")
+
+    def _is_non_interactive_terminal(self) -> bool:
+        return self.input_func is input and not sys.stdin.isatty()
 
     def _read_input(self, prompt: str) -> str:
         if not self.timeout_seconds:

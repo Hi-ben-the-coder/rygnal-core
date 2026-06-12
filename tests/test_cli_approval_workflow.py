@@ -1,3 +1,5 @@
+import builtins
+
 from demo.scenario_runner import ScenarioRunner
 from rygnal.approval import ApprovalWorkflow
 from rygnal.cli_approval import CLIApprovalResolver
@@ -103,3 +105,62 @@ def test_scenario_runner_rejects_approval_required_action_by_default(tmp_path):
     assert outcome.result.execution.status == ExecutionStatus.SKIPPED
     assert outcome.result.execution.executed is False
     assert (tmp_path / "sandbox" / "customer_data.csv").exists()
+
+
+def test_cli_approval_resolver_rejects_non_interactive_without_prompt(monkeypatch):
+    def fail_if_called(_prompt):
+        raise AssertionError("input() must not be called in non-interactive mode")
+
+    monkeypatch.setattr("sys.stdin.isatty", lambda: False)
+    monkeypatch.setattr(builtins, "input", fail_if_called)
+
+    output: list[str] = []
+    resolver = CLIApprovalResolver(
+        approver="ci_runner",
+        timeout_seconds=None,
+        output_func=output.append,
+    )
+
+    decision = resolver(make_request())
+
+    assert decision.status == ApprovalStatus.REJECTED
+    assert decision.approved is False
+    assert decision.decided_by == "ci_runner"
+    assert "non-interactive" in decision.reason.lower()
+    assert "rejected by default" in decision.reason.lower()
+
+
+def test_non_interactive_cli_approval_skips_execution_and_records_audit(
+    tmp_path,
+    monkeypatch,
+):
+    def fail_if_called(_prompt):
+        raise AssertionError("input() must not be called in non-interactive mode")
+
+    monkeypatch.setattr("sys.stdin.isatty", lambda: False)
+    monkeypatch.setattr(builtins, "input", fail_if_called)
+
+    resolver = CLIApprovalResolver(
+        approver="ci_runner",
+        timeout_seconds=None,
+        output_func=lambda _message: None,
+    )
+
+    runner = ScenarioRunner(
+        sandbox_path=tmp_path / "sandbox",
+        audit_log_path=tmp_path / "audit_log.jsonl",
+        approval_workflow=ApprovalWorkflow(resolver=resolver),
+    )
+
+    outcomes = runner.run_all()
+    outcome = next(item for item in outcomes if item.scenario.name == "file-delete-approval")
+
+    assert outcome.result.approval_decision is not None
+    assert outcome.result.approval_decision.status == ApprovalStatus.REJECTED
+    assert outcome.result.execution.status == ExecutionStatus.SKIPPED
+    assert outcome.result.execution.executed is False
+    assert (tmp_path / "sandbox" / "customer_data.csv").exists()
+
+    audit_log = (tmp_path / "audit_log.jsonl").read_text()
+    assert "non-interactive" in audit_log.lower()
+    assert "rejected by default" in audit_log.lower()
