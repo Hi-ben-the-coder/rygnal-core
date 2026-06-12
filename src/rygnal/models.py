@@ -202,6 +202,7 @@ class ApprovalRequest(BaseModel):
     target: Any | None = None
     policy_id: str | None = None
     reason: str = Field(min_length=1)
+    severity: Severity = Severity.LOW
     risk_assessment: dict[str, Any] = Field(default_factory=dict)
     metadata: dict[str, Any] = Field(default_factory=dict)
 

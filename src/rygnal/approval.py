@@ -4,6 +4,7 @@ Approval Workflow v1 handles actions that require human approval before executio
 """
 
 from collections.abc import Callable, Mapping
+from pathlib import Path
 from typing import Any
 
 from rygnal.approval_authorization import (
@@ -16,10 +17,12 @@ from rygnal.models import (
     ApprovalRequest,
     ApprovalStatus,
     PolicyDecision,
+    RolePermission,
     ToolRequest,
     new_trace_id,
     utc_now_iso,
 )
+from rygnal.roles import load_roles_file
 from rygnal.security import redact_sensitive_value
 
 ApprovalResolver = Callable[[ApprovalRequest], ApprovalDecision]
@@ -35,6 +38,7 @@ class ApprovalWorkflow:
         resolver: ApprovalResolver | None = None,
         reviewer_roles: Mapping[str, str] | None = None,
         reviewer_permissions: Mapping[str, ApprovalReviewerPermission] | None = None,
+        role_permissions: Mapping[str, RolePermission] | None = None,
         authorization_engine: ApprovalAuthorizationEngine | None = None,
     ) -> None:
         self.resolver = resolver or reject_by_default
@@ -42,7 +46,21 @@ class ApprovalWorkflow:
             reviewer_permissions=_build_reviewer_permissions(
                 reviewer_roles=reviewer_roles,
                 reviewer_permissions=reviewer_permissions,
-            )
+            ),
+            role_permissions=role_permissions,
+        )
+
+    @classmethod
+    def from_roles_file(
+        cls,
+        *,
+        roles_path: str | Path,
+        resolver: ApprovalResolver | None = None,
+    ) -> "ApprovalWorkflow":
+        """Build an approval workflow backed by operator-managed roles.yaml."""
+        return cls(
+            resolver=resolver,
+            role_permissions=load_roles_file(roles_path),
         )
 
     def request_approval(
@@ -62,6 +80,7 @@ class ApprovalWorkflow:
             target=request.target,
             policy_id=policy_decision.policy_id,
             reason=policy_decision.reason,
+            severity=policy_decision.severity,
             risk_assessment=_redacted_mapping(risk_assessment),
             metadata=_redacted_mapping(request.metadata),
         )
