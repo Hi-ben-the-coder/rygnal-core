@@ -54,6 +54,7 @@ class GuardedRunStatus(StrEnum):
     FAILED = "failed"
     TIMED_OUT = "timed_out"
     BLOCKED = "blocked"
+    APPROVAL_REQUIRED = "approval_required"
     CLEANUP_FAILED = "cleanup_failed"
 
 
@@ -488,15 +489,24 @@ def run_guarded(config: GuardedRunConfig) -> GuardedRunResult:
             )
 
             if not patch_decision.allowed:
-                status = GuardedRunStatus.BLOCKED
+                approval_required = patch_decision.risk_level == RiskLevel.HIGH
+                status = (
+                    GuardedRunStatus.APPROVAL_REQUIRED
+                    if approval_required
+                    else GuardedRunStatus.BLOCKED
+                )
                 blocked_reason = patch_decision.reason
                 warnings.append(patch_decision.reason)
 
                 _audit(
                     config,
                     trace_id=trace_id,
-                    event_type="guarded_run.patch_blocked",
-                    decision=Decision.BLOCK,
+                    event_type=(
+                        "guarded_run.patch_approval_required"
+                        if approval_required
+                        else "guarded_run.patch_blocked"
+                    ),
+                    decision=Decision.REQUIRE_APPROVAL if approval_required else Decision.BLOCK,
                     allowed=False,
                     severity=(
                         Severity.CRITICAL
@@ -663,14 +673,19 @@ def classify_and_decide_patch(patch_diff: PatchDiff) -> PatchRiskDecision:
     report = classify_patch_risk(patch_diff)
     risk_level = report.overall_risk_level
 
-    if risk_level in {RiskLevel.HIGH, RiskLevel.CRITICAL}:
+    if risk_level == RiskLevel.CRITICAL:
         return PatchRiskDecision(
             allowed=False,
             risk_level=risk_level,
-            reason=(
-                "Guarded patch requires approval before completion: "
-                f"{risk_level.value} risk change detected."
-            ),
+            reason="Guarded patch blocked before completion: critical risk change detected.",
+            report=report,
+        )
+
+    if risk_level == RiskLevel.HIGH:
+        return PatchRiskDecision(
+            allowed=False,
+            risk_level=risk_level,
+            reason="Guarded patch requires approval before completion: high risk change detected.",
             report=report,
         )
 

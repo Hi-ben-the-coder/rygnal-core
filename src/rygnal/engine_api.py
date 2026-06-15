@@ -235,6 +235,9 @@ def _engine_status_for_guarded_result(result: GuardedRunResult) -> EngineStatus:
     if result.status == GuardedRunStatus.TIMED_OUT:
         return EngineStatus.TIMED_OUT
 
+    if result.status == GuardedRunStatus.APPROVAL_REQUIRED:
+        return EngineStatus.APPROVAL_REQUIRED
+
     if result.status == GuardedRunStatus.BLOCKED:
         return EngineStatus.BLOCKED
 

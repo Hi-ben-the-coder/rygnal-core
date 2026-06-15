@@ -102,6 +102,8 @@ def exit_code_for_result(result: GuardedRunResult) -> int:
         return EXIT_COMPLETED
     if status == GuardedRunStatus.FAILED:
         return EXIT_COMMAND_FAILED
+    if status == GuardedRunStatus.APPROVAL_REQUIRED:
+        return EXIT_BLOCKED
     if status == GuardedRunStatus.BLOCKED:
         return EXIT_BLOCKED
     if status == GuardedRunStatus.TIMED_OUT:
@@ -170,7 +172,10 @@ def render_guarded_run_summary(result: GuardedRunResult) -> str:
 
     lines.append("")
     lines.append("Next:")
-    if result.status == GuardedRunStatus.BLOCKED:
+    if result.status == GuardedRunStatus.APPROVAL_REQUIRED:
+        lines.append("  Review and approve the guarded patch before applying it.")
+        lines.append("  Do not apply changes directly from the disposable workspace.")
+    elif result.status == GuardedRunStatus.BLOCKED:
         lines.append("  Fix the blocked reason and rerun the command.")
         lines.append(
             "  For dirty tracked repos, commit/stash changes or rerun with `--allow-dirty`."
