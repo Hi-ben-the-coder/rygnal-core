@@ -227,3 +227,6 @@ logs/*.jsonl
 demo_sandbox/
 logs/*.jsonl
 logs/*.jsonl
+
+# Local Go build output
+/rygnal
