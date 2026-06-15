@@ -189,12 +189,25 @@ def _run_guarded_request(request: EngineRequest) -> None:
         )
     )
 
+    final_status = _engine_status_for_guarded_result(result)
+    final_summary = _guarded_result_summary(result, request)
+
+    if final_status == EngineStatus.APPROVAL_REQUIRED:
+        _emit(
+            make_event(
+                request_id=request.request_id,
+                event=EngineEventName.APPROVAL_REQUIRED,
+                status=EngineStatus.APPROVAL_REQUIRED,
+                data=final_summary,
+            )
+        )
+
     _emit(
         make_event(
             request_id=request.request_id,
             event=EngineEventName.RUN_COMPLETED,
-            status=_engine_status_for_guarded_result(result),
-            data=_guarded_result_summary(result, request),
+            status=final_status,
+            data=final_summary,
         )
     )
 

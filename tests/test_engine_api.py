@@ -145,13 +145,22 @@ def test_engine_api_approval_required_summary_includes_risk_block(
     assert completed.stderr == ""
 
     events = _parse_ndjson(completed.stdout)
+    event_names = [event["event"] for event in events]
+    approval_event = next(event for event in events if event["event"] == "approval.required")
     final = events[-1]
+
+    assert event_names.index("approval.required") < event_names.index("run.completed")
+    assert approval_event["ok"] is True
+    assert approval_event["status"] == "approval_required"
+    assert approval_event["data"]["status"] == "approval_required"
 
     assert final["event"] == "run.completed"
     assert final["ok"] is True
     assert final["status"] == "approval_required"
 
     data = final["data"]
+    assert approval_event["data"]["approval"] == data["approval"]
+    assert approval_event["data"]["risk"] == data["risk"]
     assert data["status"] == "approval_required"
     assert data["approval"]["required"] is True
     assert data["approval"]["approval_id"]
