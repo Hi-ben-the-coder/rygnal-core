@@ -140,6 +140,10 @@ def render_guarded_run_summary(result: GuardedRunResult) -> str:
     if blocked_reason:
         lines.append(f"Reason: {blocked_reason}")
 
+    approval_request = getattr(result, "approval_request", None)
+    if approval_request is not None:
+        lines.append(f"Approval ID: {approval_request.approval_id}")
+
     lines.extend(
         [
             "",
@@ -222,6 +226,21 @@ def to_safe_json_summary(result: GuardedRunResult) -> dict[str, Any]:
             "size_bytes": patch.patch_size_bytes if patch else 0,
         },
         "warnings": _unique_warnings(result.warnings),
+    }
+
+
+def _approval_json_summary(result: GuardedRunResult) -> dict[str, Any]:
+    approval_request = getattr(result, "approval_request", None)
+
+    if approval_request is None:
+        return {"required": False}
+
+    return {
+        "required": True,
+        "approval_id": approval_request.approval_id,
+        "target": approval_request.target,
+        "severity": approval_request.severity.value,
+        "reason": approval_request.reason,
     }
 
 

@@ -247,6 +247,22 @@ def _engine_status_for_guarded_result(result: GuardedRunResult) -> EngineStatus:
     return EngineStatus.BLOCKED if result.blocked_reason else EngineStatus.COMMAND_FAILED
 
 
+def _approval_summary(result: GuardedRunResult) -> dict[str, Any]:
+    approval_request = getattr(result, "approval_request", None)
+
+    if approval_request is None:
+        return {"required": False}
+
+    return {
+        "required": True,
+        "approval_id": approval_request.approval_id,
+        "target": approval_request.target,
+        "policy_id": approval_request.policy_id,
+        "severity": approval_request.severity.value,
+        "reason": approval_request.reason,
+    }
+
+
 def _guarded_result_summary(result: GuardedRunResult, request: EngineRequest) -> dict[str, Any]:
     changed_files = ()
     ignored_file_count = 0
@@ -290,6 +306,7 @@ def _guarded_result_summary(result: GuardedRunResult, request: EngineRequest) ->
         },
         "patch": _patch_summary(result, request),
         "blocked_reason": result.blocked_reason,
+        "approval": _approval_summary(result),
         "warnings": tuple(dict.fromkeys(result.warnings)),
     }
 

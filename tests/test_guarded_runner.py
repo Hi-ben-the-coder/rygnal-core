@@ -658,6 +658,11 @@ def test_high_risk_dependency_patch_requires_approval_before_completion(tmp_path
 
     assert result.status == GuardedRunStatus.APPROVAL_REQUIRED
     assert result.patch_diff is not None
+    assert result.approval_request is not None
+    assert result.approval_request.target == result.patch_diff.patch_sha256
+    assert result.approval_request.requested_by == "local_user"
+    assert result.approval_request.agent_id == "local_agent"
+    assert result.approval_request.environment == "local"
     assert result.change_risk_report is not None
     assert result.change_risk_report.overall_risk_level == RiskLevel.HIGH
     assert "requires approval" in result.blocked_reason
@@ -686,6 +691,7 @@ def test_critical_secret_patch_is_blocked_before_completion(tmp_path: Path) -> N
 
     assert result.status == GuardedRunStatus.BLOCKED
     assert result.patch_diff is not None
+    assert result.approval_request is None
     assert result.change_risk_report is not None
     assert result.change_risk_report.overall_risk_level == RiskLevel.CRITICAL
     assert "blocked" in result.blocked_reason

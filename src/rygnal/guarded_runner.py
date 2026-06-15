@@ -31,7 +31,15 @@ from rygnal.guarded_worktree import (
     create_guarded_worktree,
     detect_trusted_repo_root,
 )
-from rygnal.models import Decision, PolicyDecision, Severity, ToolRequest, new_trace_id
+from rygnal.models import (
+    ApprovalRequest,
+    Decision,
+    PolicyDecision,
+    Severity,
+    ToolRequest,
+    new_trace_id,
+)
+from rygnal.patch_approval import PatchApprovalError, create_patch_approval_request
 from rygnal.patch_diff import PatchDiff, PatchDiffGenerationError, generate_patch_diff_from_report
 from rygnal.process_containment import (
     LifecycleEvent,
@@ -119,6 +127,7 @@ class GuardedRunResult:
 
     blocked_reason: str | None
     warnings: tuple[str, ...]
+    approval_request: ApprovalRequest | None = None
 
 
 @dataclass(frozen=True)
@@ -353,6 +362,7 @@ def run_guarded(config: GuardedRunConfig) -> GuardedRunResult:
     cleanup_result: CleanupResult | None = None
     cleanup_performed = False
     blocked_reason: str | None = None
+    approval_request: ApprovalRequest | None = None
     status = GuardedRunStatus.FAILED
 
     try:
@@ -498,6 +508,22 @@ def run_guarded(config: GuardedRunConfig) -> GuardedRunResult:
                 blocked_reason = patch_decision.reason
                 warnings.append(patch_decision.reason)
 
+                if approval_required:
+                    try:
+                        approval_request = create_patch_approval_request(
+                            patch_diff,
+                            risk_report=change_risk_report,
+                            requested_by=config.user_id,
+                            agent_id=config.agent_id,
+                            environment=config.environment,
+                            trace_id=trace_id,
+                        )
+                    except PatchApprovalError as exc:
+                        approval_required = False
+                        status = GuardedRunStatus.BLOCKED
+                        blocked_reason = f"Failed to create guarded patch approval request: {exc}"
+                        warnings.append(blocked_reason)
+
                 _audit(
                     config,
                     trace_id=trace_id,
@@ -513,10 +539,15 @@ def run_guarded(config: GuardedRunConfig) -> GuardedRunResult:
                         if patch_decision.risk_level == RiskLevel.CRITICAL
                         else Severity.HIGH
                     ),
-                    reason=patch_decision.reason,
+                    reason=blocked_reason or patch_decision.reason,
                     metadata={
                         **_worktree_metadata(worktree, backend_name, containment_verified),
                         "patch_risk": patch_decision.audit_summary,
+                        "approval_request": (
+                            approval_request.model_dump(mode="json")
+                            if approval_request is not None
+                            else None
+                        ),
                     },
                 )
 
@@ -664,6 +695,7 @@ def run_guarded(config: GuardedRunConfig) -> GuardedRunResult:
         change_risk_report=change_risk_report,
         blocked_reason=blocked_reason,
         warnings=tuple(warnings),
+        approval_request=approval_request,
     )
 
 
