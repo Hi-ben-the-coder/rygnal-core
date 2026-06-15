@@ -138,8 +138,10 @@ def test_runner_dangerous_secret_patch_is_blocked_by_existing_gate(
         )
     )
 
-    assert result.status == GuardedRunStatus.COMPLETED
+    assert result.status == GuardedRunStatus.BLOCKED
     assert result.patch_diff is not None
+    assert result.change_risk_report is not None
+    assert result.blocked_reason is not None
     assert not (trusted / ".env").exists()
     assert git_status_porcelain(trusted) == ""
 
