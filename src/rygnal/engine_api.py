@@ -305,9 +305,38 @@ def _guarded_result_summary(result: GuardedRunResult, request: EngineRequest) ->
             ),
         },
         "patch": _patch_summary(result, request),
+        "risk": _risk_summary(result),
         "blocked_reason": result.blocked_reason,
         "approval": _approval_summary(result),
         "warnings": tuple(dict.fromkeys(result.warnings)),
+    }
+
+
+def _risk_summary(result: GuardedRunResult) -> dict[str, Any]:
+    risk_report = result.change_risk_report
+
+    if risk_report is None:
+        return {
+            "present": False,
+            "level": "low",
+            "reasons": (),
+            "counts": {},
+        }
+
+    reason_codes: list[str] = []
+
+    for report_reason in risk_report.report_reasons:
+        reason_codes.append(report_reason.code)
+
+    for file_risk in risk_report.files:
+        for reason in file_risk.reasons:
+            reason_codes.append(reason.code)
+
+    return {
+        "present": True,
+        "level": risk_report.overall_risk_level.value,
+        "reasons": tuple(dict.fromkeys(reason_codes)),
+        "counts": risk_report.risk_counts,
     }
 
 
