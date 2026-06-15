@@ -69,10 +69,12 @@ def test_m1_guarded_run_detects_added_modified_deleted_and_renamed_without_mutat
         )
     )
 
-    assert result.status == GuardedRunStatus.COMPLETED
+    assert result.status == GuardedRunStatus.BLOCKED
     assert result.baseline_commit_sha == baseline
     assert result.changed_file_report is not None
     assert result.patch_diff is not None
+    assert result.change_risk_report is not None
+    assert result.blocked_reason is not None
     assert result.patch_diff.patch_sha256
 
     report_paths = changed_paths(result)
@@ -183,8 +185,10 @@ def test_m1_protected_files_remain_visible_and_do_not_auto_apply(
         )
     )
 
-    assert result.status == GuardedRunStatus.COMPLETED
+    assert result.status == GuardedRunStatus.BLOCKED
     assert result.patch_diff is not None
+    assert result.change_risk_report is not None
+    assert result.blocked_reason is not None
     assert "requirements.txt" in patch_paths(result)
     assert ".github/workflows/ci.yml" in patch_paths(result)
 

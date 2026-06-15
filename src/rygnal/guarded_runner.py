@@ -11,6 +11,11 @@ from pathlib import Path, PurePosixPath
 from typing import Protocol
 
 from rygnal.audit_logger import AuditLogger
+from rygnal.change_risk import (
+    ChangeRiskClassificationError,
+    ChangeRiskReport,
+    classify_patch_risk,
+)
 from rygnal.changed_files import ChangedFileDetectionError, ChangedFileReport, detect_changed_files
 from rygnal.execution_backend import (
     ExecutionBackendName,
@@ -34,6 +39,7 @@ from rygnal.process_containment import (
     evaluate_containment_capabilities,
 )
 from rygnal.repo_state import DirtyRepositoryError, get_uncommitted_changes
+from rygnal.risk_engine import RiskLevel
 from rygnal.untracked_files import UntrackedFilePolicy
 from rygnal.workspace_cleanup import CleanupResult, CleanupStatus, destroy_worktree
 
@@ -108,9 +114,27 @@ class GuardedRunResult:
     command_result: GuardedCommandResult | None
     changed_file_report: ChangedFileReport | None
     patch_diff: PatchDiff | None
+    change_risk_report: ChangeRiskReport | None
 
     blocked_reason: str | None
     warnings: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class PatchRiskDecision:
+    allowed: bool
+    risk_level: RiskLevel
+    reason: str
+    report: ChangeRiskReport
+
+    @property
+    def audit_summary(self) -> dict[str, object]:
+        return {
+            "allowed": self.allowed,
+            "risk_level": self.risk_level.value,
+            "reason": self.reason,
+            "report": self.report.audit_summary,
+        }
 
 
 class CommandBackend(Protocol):
@@ -324,6 +348,7 @@ def run_guarded(config: GuardedRunConfig) -> GuardedRunResult:
     command_result: GuardedCommandResult | None = None
     changed_file_report: ChangedFileReport | None = None
     patch_diff: PatchDiff | None = None
+    change_risk_report: ChangeRiskReport | None = None
     cleanup_result: CleanupResult | None = None
     cleanup_performed = False
     blocked_reason: str | None = None
@@ -437,6 +462,53 @@ def run_guarded(config: GuardedRunConfig) -> GuardedRunResult:
 
         if changed_file_report.files:
             patch_diff = generate_patch_diff_from_report(changed_file_report)
+            patch_decision = classify_and_decide_patch(patch_diff)
+            change_risk_report = patch_decision.report
+
+            _audit(
+                config,
+                trace_id=trace_id,
+                event_type="guarded_run.patch_classified",
+                decision=Decision.ALLOW if patch_decision.allowed else Decision.BLOCK,
+                allowed=patch_decision.allowed,
+                severity=(
+                    Severity.CRITICAL
+                    if patch_decision.risk_level == RiskLevel.CRITICAL
+                    else Severity.HIGH
+                    if patch_decision.risk_level == RiskLevel.HIGH
+                    else Severity.MEDIUM
+                    if patch_decision.risk_level == RiskLevel.MEDIUM
+                    else Severity.LOW
+                ),
+                reason=patch_decision.reason,
+                metadata={
+                    **_worktree_metadata(worktree, backend_name, containment_verified),
+                    "patch_risk": patch_decision.audit_summary,
+                },
+            )
+
+            if not patch_decision.allowed:
+                status = GuardedRunStatus.BLOCKED
+                blocked_reason = patch_decision.reason
+                warnings.append(patch_decision.reason)
+
+                _audit(
+                    config,
+                    trace_id=trace_id,
+                    event_type="guarded_run.patch_blocked",
+                    decision=Decision.BLOCK,
+                    allowed=False,
+                    severity=(
+                        Severity.CRITICAL
+                        if patch_decision.risk_level == RiskLevel.CRITICAL
+                        else Severity.HIGH
+                    ),
+                    reason=patch_decision.reason,
+                    metadata={
+                        **_worktree_metadata(worktree, backend_name, containment_verified),
+                        "patch_risk": patch_decision.audit_summary,
+                    },
+                )
 
         _audit(
             config,
@@ -472,7 +544,11 @@ def run_guarded(config: GuardedRunConfig) -> GuardedRunResult:
                 "baseline_commit_sha": worktree.baseline_commit_sha if worktree else None,
             },
         )
-    except (ChangedFileDetectionError, PatchDiffGenerationError) as exc:
+    except (
+        ChangedFileDetectionError,
+        PatchDiffGenerationError,
+        ChangeRiskClassificationError,
+    ) as exc:
         blocked_reason = str(exc)
         status = GuardedRunStatus.FAILED
         warnings.append(blocked_reason)
@@ -575,8 +651,34 @@ def run_guarded(config: GuardedRunConfig) -> GuardedRunResult:
         command_result=command_result,
         changed_file_report=changed_file_report,
         patch_diff=patch_diff,
+        change_risk_report=change_risk_report,
         blocked_reason=blocked_reason,
         warnings=tuple(warnings),
+    )
+
+
+def classify_and_decide_patch(patch_diff: PatchDiff) -> PatchRiskDecision:
+    """Hard enforcement gate for guarded workspace patches."""
+
+    report = classify_patch_risk(patch_diff)
+    risk_level = report.overall_risk_level
+
+    if risk_level in {RiskLevel.HIGH, RiskLevel.CRITICAL}:
+        return PatchRiskDecision(
+            allowed=False,
+            risk_level=risk_level,
+            reason=(
+                "Guarded patch requires approval before completion: "
+                f"{risk_level.value} risk change detected."
+            ),
+            report=report,
+        )
+
+    return PatchRiskDecision(
+        allowed=True,
+        risk_level=risk_level,
+        reason="Guarded patch accepted by deterministic patch-risk gate.",
+        report=report,
     )
 
 
@@ -821,6 +923,7 @@ def _blocked_result(
         command_result=None,
         changed_file_report=None,
         patch_diff=None,
+        change_risk_report=None,
         blocked_reason=reason,
         warnings=tuple(warnings),
     )

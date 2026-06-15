@@ -86,8 +86,10 @@ def test_hostile_symlink_to_outside_repo_is_reported_and_blocked_by_gate(
         )
     )
 
-    assert result.status == GuardedRunStatus.COMPLETED
+    assert result.status == GuardedRunStatus.BLOCKED
     assert result.patch_diff is not None
+    assert result.change_risk_report is not None
+    assert result.blocked_reason is not None
 
     risk_report = classify_patch_risk(result.patch_diff)
     gate = evaluate_guarded_change_gate(result.patch_diff, risk_report=risk_report)
@@ -111,8 +113,10 @@ def test_hostile_large_change_skips_auto_apply(
         )
     )
 
-    assert result.status == GuardedRunStatus.COMPLETED
+    assert result.status == GuardedRunStatus.BLOCKED
     assert result.patch_diff is not None
+    assert result.change_risk_report is not None
+    assert result.blocked_reason is not None
 
     risk_report = classify_patch_risk(result.patch_diff)
     apply_result = auto_apply_safe_patch(
@@ -145,8 +149,10 @@ def test_hostile_dependency_manifest_change_remains_visible_and_skips_auto_apply
         )
     )
 
-    assert result.status == GuardedRunStatus.COMPLETED
+    assert result.status == GuardedRunStatus.BLOCKED
     assert result.patch_diff is not None
+    assert result.change_risk_report is not None
+    assert result.blocked_reason is not None
     assert any(file.path == "requirements.txt" for file in result.patch_diff.files)
 
     risk_report = classify_patch_risk(result.patch_diff)
@@ -176,8 +182,10 @@ def test_hostile_fake_secret_not_written_to_audit(
         )
     )
 
-    assert result.status == GuardedRunStatus.COMPLETED
+    assert result.status == GuardedRunStatus.BLOCKED
     assert result.patch_diff is not None
+    assert result.change_risk_report is not None
+    assert result.blocked_reason is not None
     assert fake_secret in result.patch_diff.patch
     assert fake_secret not in audit_text(audit_path)
     assert audit.verify_integrity()
@@ -275,8 +283,10 @@ def test_hostile_attempt_common_secret_path_in_workspace_is_captured_not_applied
         )
     )
 
-    assert result.status == GuardedRunStatus.COMPLETED
+    assert result.status == GuardedRunStatus.BLOCKED
     assert result.patch_diff is not None
+    assert result.change_risk_report is not None
+    assert result.blocked_reason is not None
     assert any(file.path == ".aws/credentials" for file in result.patch_diff.files)
 
     risk_report = classify_patch_risk(result.patch_diff)

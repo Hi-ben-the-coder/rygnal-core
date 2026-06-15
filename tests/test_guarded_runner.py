@@ -13,6 +13,7 @@ from rygnal.guarded_runner import (
     GuardedRunStatus,
     run_guarded,
 )
+from rygnal.risk_engine import RiskLevel
 from rygnal.untracked_files import UntrackedFilePolicy
 from rygnal.workspace_cleanup import CleanupResult, CleanupStatus
 
@@ -464,9 +465,11 @@ def test_added_modified_deleted_files_are_detected_and_patch_is_generated(
 
     paths = {file.path for file in result.changed_file_report.files}
 
-    assert result.status == GuardedRunStatus.COMPLETED
+    assert result.status == GuardedRunStatus.BLOCKED
     assert {"new.txt", "README.md", "delete_me.txt"}.issubset(paths)
     assert result.patch_diff is not None
+    assert result.change_risk_report is not None
+    assert result.blocked_reason is not None
     assert result.patch_diff.patch_sha256
     assert result.patch_diff.patch_size_bytes > 0
 
@@ -636,3 +639,56 @@ def test_bubblewrap_backend_can_run_simple_command(
     assert result.containment_verified is True
     assert Path(result.workspace_path, "bwrap.txt").read_text(encoding="utf-8") == "ok"
     assert not (repo / "bwrap.txt").exists()
+
+
+def test_high_risk_dependency_patch_is_blocked_before_completion(tmp_path: Path) -> None:
+    repo = create_repo(tmp_path / "repo")
+    audit = AuditLogger(tmp_path / "audit.jsonl")
+
+    result = run_guarded(
+        unsafe_config(
+            repo,
+            py_command(
+                "from pathlib import Path; "
+                "Path('pyproject.toml').write_text('[project]\\nname = \"changed\"\\n')"
+            ),
+            audit_logger=audit,
+        )
+    )
+
+    assert result.status == GuardedRunStatus.BLOCKED
+    assert result.patch_diff is not None
+    assert result.change_risk_report is not None
+    assert result.change_risk_report.overall_risk_level == RiskLevel.HIGH
+    assert "requires approval" in result.blocked_reason
+    assert "guarded_run.patch_classified" in audit_actions(audit)
+    assert "guarded_run.patch_blocked" in audit_actions(audit)
+    assert result.cleanup_performed is True
+    assert not Path(result.workspace_path).exists()
+    assert audit.verify_integrity()
+
+
+def test_critical_secret_patch_is_blocked_before_completion(tmp_path: Path) -> None:
+    repo = create_repo(tmp_path / "repo")
+    audit = AuditLogger(tmp_path / "audit.jsonl")
+
+    result = run_guarded(
+        unsafe_config(
+            repo,
+            py_command(
+                "from pathlib import Path; "
+                "Path('.env').write_text('OPENAI_API_KEY=sk-testsecret000000000000\\n')"
+            ),
+            audit_logger=audit,
+        )
+    )
+
+    assert result.status == GuardedRunStatus.BLOCKED
+    assert result.patch_diff is not None
+    assert result.change_risk_report is not None
+    assert result.change_risk_report.overall_risk_level == RiskLevel.CRITICAL
+    assert "requires approval" in result.blocked_reason
+    assert "guarded_run.patch_blocked" in audit_actions(audit)
+    assert result.cleanup_performed is True
+    assert not Path(result.workspace_path).exists()
+    assert audit.verify_integrity()
