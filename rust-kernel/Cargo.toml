@@ -1,0 +1,11 @@
+[package]
+name = "rygnal-kernel"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "rygnal_kernel"
+crate-type = ["cdylib"]
+
+[dependencies]
+pyo3 = { version = "0.20", features = ["extension-module"] }
