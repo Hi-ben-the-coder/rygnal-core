@@ -20,9 +20,10 @@ from rygnal.guarded_runner import (
 EXIT_COMPLETED = 0
 EXIT_COMMAND_FAILED = 1
 EXIT_BLOCKED = 2
-EXIT_TIMED_OUT = 3
-EXIT_CLEANUP_FAILED = 4
-EXIT_USAGE_ERROR = 5
+EXIT_APPROVAL_REQUIRED = 3
+EXIT_TIMED_OUT = 4
+EXIT_CLEANUP_FAILED = 5
+EXIT_USAGE_ERROR = 64
 
 
 def default_guarded_run_root() -> Path:
@@ -103,7 +104,7 @@ def exit_code_for_result(result: GuardedRunResult) -> int:
     if status == GuardedRunStatus.FAILED:
         return EXIT_COMMAND_FAILED
     if status == GuardedRunStatus.APPROVAL_REQUIRED:
-        return EXIT_BLOCKED
+        return EXIT_APPROVAL_REQUIRED
     if status == GuardedRunStatus.BLOCKED:
         return EXIT_BLOCKED
     if status == GuardedRunStatus.TIMED_OUT:
