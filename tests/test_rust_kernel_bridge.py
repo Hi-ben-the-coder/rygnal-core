@@ -10,9 +10,7 @@ def test_rust_kernel_bridge_round_trip() -> None:
 
     result = rygnal_kernel.verify_bridge("pytest handshake")
 
-    assert result == (
-        "[Rust Kernel]: Connection secure. Received payload -> pytest handshake"
-    )
+    assert result == ("[Rust Kernel]: Connection secure. Received payload -> pytest handshake")
 
 
 def test_rust_kernel_evaluates_patch_risk() -> None:
@@ -29,9 +27,7 @@ def test_rust_kernel_evaluates_patch_risk() -> None:
     result = rygnal_kernel.evaluate_patch_risk(json.dumps(payload))
 
     assert result == (
-        "Kernel evaluated patch [abc123xyz]. "
-        "Analyzed 2 files. "
-        "High-risk deletions detected: 1"
+        "Kernel evaluated patch [abc123xyz]. Analyzed 2 files. High-risk deletions detected: 1"
     )
 
 
